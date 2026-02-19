@@ -1,0 +1,231 @@
+using UnityEngine;
+using System.Collections.Generic;
+using TMPro; // Assuming you are using TextMeshPro for UI text
+
+// This component handles all Unity-specific tasks: input processing,
+// visual representation (instantiating pieces/highlights), and UI updates.
+public class GameManager : MonoBehaviour
+{
+    // --- Public Fields (Set in Unity Inspector) ---
+    [Header("Visual Prefabs")]
+    public GameObject BoardSquarePrefab;
+    public Transform BoardParent; // Parent object for the board squares
+    public GameObject SelectionHighlightPrefab; // Used for highlighting moves/attacks
+    
+    [Header("Piece Visuals")]
+    // Maps piece type name (e.g., "Villager") to its visual prefab
+    public Dictionary<string, GameObject> PiecePrefabs = new Dictionary<string, GameObject>();
+
+    [Header("UI Elements")]
+    public TextMeshProUGUI ManaText;
+    public TextMeshProUGUI TurnText;
+    public GameObject GameOverScreen;
+
+    // --- Internal State ---
+    private GameLogic _logic;
+    // Maps grid position to the instantiated piece GameObject for fast look-up and manipulation
+    private Dictionary<Vector2Int, GameObject> _pieceObjects = new Dictionary<Vector2Int, GameObject>();
+    private List<GameObject> _highlightObjects = new List<GameObject>(); // List of active highlights
+
+    // --- Unity Lifecycle ---
+    void Start()
+    {
+        // Mock Initialization: In a real project, you would load these properly.
+        InitializePrefabsMock(); 
+
+        // 1. Initialize core game logic (passes 'this' as the controller callback reference)
+        _logic = new GameLogic(this); 
+
+        // 2. Set up the visual board structure
+        SetupVisualBoard();
+        
+        // Ensure game over screen is hidden initially
+        if (GameOverScreen != null) GameOverScreen.SetActive(false);
+    }
+
+    // Mock initialization for piece prefabs dictionary
+    void InitializePrefabsMock()
+    {
+        // NOTE: You must populate the 'PiecePrefabs' dictionary with your actual prefabs
+        // For demonstration, we use placeholder GameObjects.
+        PiecePrefabs.Add("Villager", new GameObject("Villager_Prefab"));
+        PiecePrefabs.Add("Zombie", new GameObject("Zombie_Prefab"));
+        PiecePrefabs.Add("Creeper", new GameObject("Creeper_Prefab"));
+        // Add all 12 types here...
+    }
+    
+    // Creates the 10x8 grid of clickable BoardSquare objects
+    void SetupVisualBoard()
+    {
+        for (int x = 0; x < GameLogic.BOARD_WIDTH; x++)
+        {
+            for (int y = 0; y < GameLogic.BOARD_HEIGHT; y++)
+            {
+                Vector3 worldPos = new Vector3(x, 0, y);
+                if (BoardSquarePrefab != null)
+                {
+                    GameObject square = Instantiate(BoardSquarePrefab, worldPos, Quaternion.identity, BoardParent);
+                    // ASSUMPTION: The BoardSquare component handles its own click event
+                    // and calls GameManager.SquareClicked(pos, null) when clicked.
+                    // square.GetComponent<BoardSquare>().Initialize(new Vector2Int(x, y), this); 
+                    square.name = $"Square ({x},{y})";
+                }
+            }
+        }
+    }
+
+    // --- Input Bridge (Called by a clicked BoardSquare component) ---
+    // This method receives input from the scene and passes it to the GameLogic.
+    public void SquareClicked(Vector2Int pos, MinionData? minionToSummon = null)
+    {
+        if (GameOverScreen != null && GameOverScreen.activeInHierarchy) return;
+        
+        _logic.HandleSquareClick(pos, minionToSummon);
+    }
+    
+    // Public method for the 'End Turn' UI button
+    public void EndTurnButtonClicked()
+    {
+        _logic.SwitchTurn();
+    }
+    
+    // --- Callbacks from GameLogic (Visual/Scene Management) ---
+
+    // 1. Piece Creation: Instantiates a visual piece object
+    public void OnPieceCreated(string pieceType, Vector2Int pos)
+    {
+        if (PiecePrefabs.ContainsKey(pieceType) && PiecePrefabs[pieceType] != null)
+        {
+            GameObject prefab = PiecePrefabs[pieceType];
+            // Y=0.5f to lift the piece slightly off the board plane
+            Vector3 worldPos = new Vector3(pos.x, 0.5f, pos.y); 
+            GameObject pieceObj = Instantiate(prefab, worldPos, Quaternion.identity);
+            
+            // Store reference, using the position as the key
+            _pieceObjects.Add(pos, pieceObj);
+            
+            // Optional: You would set the piece's color/material here based on _logic.currentPlayer.color
+        }
+        else
+        {
+            Debug.LogError($"Prefab not found or is null for piece type: {pieceType}. Ensure InitializePrefabsMock is correct.");
+        }
+    }
+
+    // 2. Piece Movement: Updates the visual position
+    public void OnPieceMoved(Vector2Int oldPos, Vector2Int newPos)
+    {
+        if (_pieceObjects.TryGetValue(oldPos, out GameObject pieceObj))
+        {
+            // Update visual position (smooth movement via Lerp/Coroutines can be added later)
+            pieceObj.transform.position = new Vector3(newPos.x, pieceObj.transform.position.y, newPos.y);
+            
+            // Update the dictionary key to the piece's new position
+            _pieceObjects.Remove(oldPos);
+            _pieceObjects.Add(newPos, pieceObj);
+        }
+        else
+        {
+            Debug.LogError($"Visual piece object not found at {oldPos} during move.");
+        }
+    }
+
+    // 3. Piece Elimination: Destroys the visual object
+    public void OnPieceEliminated(Vector2Int pos)
+    {
+        if (_pieceObjects.TryGetValue(pos, out GameObject pieceObj))
+        {
+            _pieceObjects.Remove(pos);
+            Destroy(pieceObj);
+        }
+    }
+    
+    // 4. Show Highlights: Creates visual indicators for valid moves/attacks
+    public void ShowSelectionHighlights(Vector2Int selectedPos, List<Vector2Int> moves, List<Vector2Int> attacks)
+    {
+        HideSelectionHighlights(); // Clear existing highlights first
+        
+        // Highlight the selected piece itself (e.g., green)
+        HighlightSquare(selectedPos, Color.green); 
+
+        // Highlight valid moves (e.g., blue)
+        foreach (var pos in moves)
+        {
+            HighlightSquare(pos, Color.cyan);
+        }
+
+        // Highlight valid attacks (e.g., red)
+        foreach (var pos in attacks)
+        {
+            HighlightSquare(pos, Color.red);
+        }
+    }
+    
+    // Utility to instantiate a single highlight
+    void HighlightSquare(Vector2Int pos, Color color)
+    {
+        if (SelectionHighlightPrefab == null) return;
+        
+        // Position slightly above the board (Y=0.1f)
+        Vector3 worldPos = new Vector3(pos.x, 0.1f, pos.y);
+        GameObject highlight = Instantiate(SelectionHighlightPrefab, worldPos, Quaternion.identity);
+        
+        // ASSUMPTION: The highlight prefab has a material or component to set the color
+        // Example: highlight.GetComponent<Renderer>().material.color = color;
+        
+        _highlightObjects.Add(highlight);
+    }
+
+    // 5. Hide Highlights: Destroys all active indicators
+    public void HideSelectionHighlights()
+    {
+        foreach(var highlight in _highlightObjects)
+        {
+            // Use null check because DestroyImmediate is not called in play mode
+            if (highlight != null)
+            {
+                 Destroy(highlight);
+            }
+        }
+        _highlightObjects.Clear();
+    }
+
+    // 6. Clear Summon Selection (if UI was in summon mode)
+    public void ClearSummonSelection()
+    {
+        // This is where you'd implement UI logic to turn off a "card selected" state
+        Debug.Log("GameManager UI: Summon selection state reset.");
+    }
+
+    // 7. Update UI: Refreshes all player-facing information
+    public void UpdateUI()
+    {
+        PlayerData current = _logic.currentPlayer;
+        
+        // Update Turn Indicator
+        if (TurnText != null)
+        {
+            TurnText.text = $"{current.color}'s Turn";
+            TurnText.color = (current.color == PlayerColor.White) ? Color.white : Color.black;
+        }
+
+        // Update Mana Text
+        if (ManaText != null)
+        {
+            ManaText.text = $"Mana: {current.mana} / {current.currentManaCap}";
+        }
+
+        // TODO: Update Card Display based on current.hand
+    }
+
+    // 8. Game Ended: Displays the game over screen
+    public void OnGameEnded(PlayerData winner)
+    {
+        Debug.Log("Game Over detected by GameManager. Showing screen.");
+        if (GameOverScreen != null)
+        {
+            GameOverScreen.SetActive(true);
+            // You would typically update the text on the GameOverScreen here
+        }
+    }
+}

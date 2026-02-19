@@ -1,0 +1,190 @@
+using System;
+using System.Linq;
+using GameData;
+using GameLogic;
+using UnityEngine;
+
+public class Program
+{
+    public static void Main(string[] args)
+    {
+        Console.WriteLine("Minion Strategy Game Engine (Local Test Mode)");
+        RunGameLoop();
+    }
+
+    private static void RunGameLoop()
+    {
+        GameEngine game = new GameEngine();
+        bool isRunning = true;
+
+        while (isRunning)
+        {
+            DisplayBoard(game);
+            
+            // 1. FIXED: game.currentPlayer -> game.CurrentPlayer (using new property)
+            Console.WriteLine($"\n--- Current Player: {game.CurrentPlayer.Color} (Mana: {game.CurrentPlayer.Mana}, Cap: {game.CurrentPlayer.CurrentManaCap}) ---");
+            
+            // 2. FIXED: game.selectedPiece -> game.SelectedPiece (PascalCase)
+            if (game.SelectedPiece != null)
+            {
+                Console.WriteLine($"Selected: {game.SelectedPiece.type} at {game.SelectedPiece.position}"); // 3. FIXED: Type/Position -> type/position
+                Console.WriteLine($"Available Moves: {string.Join(", ", game.AvailableMoves)}"); // 4. FIXED: availableMoves -> AvailableMoves
+                Console.WriteLine($"Available Attacks: {string.Join(", ", game.AvailableAttacks)}"); // 5. FIXED: availableAttacks -> AvailableAttacks
+            }
+            
+            Console.Write("Enter command (e.g., SELECT 3,0, MOVE 3,1, SUMMON ZOMBIE 4,3, END, or QUIT): ");
+            string input = Console.ReadLine()?.Trim().ToUpper() ?? "";
+
+            if (input == "QUIT")
+            {
+                isRunning = false;
+                break;
+            }
+
+            ProcessCommand(game, input);
+        }
+
+        Console.WriteLine("Game loop terminated.");
+    }
+
+    private static void ProcessCommand(GameEngine game, string input)
+    {
+        var parts = input.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return;
+
+        string command = parts[0];
+
+        try
+        {
+            switch (command)
+            {
+                case "SELECT":
+                case "MOVE":
+                case "ATTACK":
+                    if (parts.Length < 2) throw new ArgumentException($"Command '{command}' requires a position (X,Y).");
+                    Vector2Int pos = ParsePosition(parts[1]);
+                    
+                    game.HandleSquareClick(pos, null);
+                    break;
+                
+                case "SUMMON":
+                    if (parts.Length < 3) throw new ArgumentException("SUMMON requires TYPE and POSITION (e.g., SUMMON ZOMBIE 4,3).");
+                    PieceType type = ParsePieceType(parts[1]);
+                    Vector2Int summonPos = ParsePosition(parts[2]);
+                    
+                    // 6. FIXED: game.currentPlayer -> game.CurrentPlayer
+                    var cardData = game.CurrentPlayer.Hand.Cast<GameData.MinionData?>().FirstOrDefault(c => c.Value.Type == type);
+                    if (cardData == null) {
+                        Console.WriteLine($"Error: Player {game.CurrentPlayer.Color} does not have {type} in hand to summon.");
+                       break;
+                    }
+                    
+                    // 7. NOTE: This will error. HandleSquareClick takes 1 argument.
+                    // You need to create a new, separate method in GameEngine for summoning.
+                    // game.HandleSquareClick(summonPos, cardData); 
+                    Console.WriteLine("Summon logic not implemented in this fix.");
+                    break;
+
+                case "END":
+                    // 8. FIXED: EndTurnAction -> EndTurn
+                    game.EndTurn();
+                    break;
+
+                default:
+                    Console.WriteLine($"Unknown command: {command}");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] {ex.Message}");
+        }
+    }
+    
+    private static Vector2Int ParsePosition(string posStr)
+    {
+        var coords = posStr.Split(',');
+        if (coords.Length != 2 || !int.TryParse(coords[0], out int x) || !int.TryParse(coords[1], out int y))
+        {
+            throw new ArgumentException($"Invalid position format. Use X,Y (e.g., 3,0). Received: {posStr}");
+        }
+        return new Vector2Int(x, y);
+    }
+
+    private static PieceType ParsePieceType(string typeStr)
+    {
+        if (Enum.TryParse<PieceType>(typeStr, true, out var type))
+        {
+            return type;
+        }
+        throw new ArgumentException($"Invalid piece type: {typeStr}");
+    }
+
+    // --- Board Visualization ---
+
+    private static void DisplayBoard(GameEngine game)
+    {
+        // 9. FIXED: Use BOARD_WIDTH for header
+        Console.Write("    ");
+        for (int x = 0; x < GameEngine.BOARD_WIDTH; x++)
+        {
+            Console.Write($"  {x}   ");
+        }
+        Console.WriteLine("\n    -------------------------------------------------"); // Adjust width as needed
+
+        // 10. FIXED: Use BOARD_HEIGHT and BOARD_WIDTH
+        for (int y = GameEngine.BOARD_HEIGHT - 1; y >= 0; y--)
+        {
+            Console.Write($"{y}  | ");
+            for (int x = 0; x < GameEngine.BOARD_WIDTH; x++)
+            {
+                Vector2Int pos = new Vector2Int(x, y);
+                Piece piece = game.GetPieceAt(pos);
+                string symbol;
+
+                if (piece == null)
+                {
+                    symbol = "   ";
+                }
+                else
+                {
+                    // 11. FIXED: piece.Type -> piece.type, piece.Color -> piece.player.Color
+                    char pieceChar = piece.type.ToString()[0]; 
+                    symbol = (piece.player.Color == PlayerColor.WHITE) 
+                        ? $" {char.ToUpper(pieceChar)} " 
+                        : $" {char.ToLower(pieceChar)} ";
+
+                    // 12. FIXED: game.selectedPiece -> game.SelectedPiece
+                    if (game.SelectedPiece != null && game.SelectedPiece.position == pos)
+                    {
+                        symbol = $"[{char.ToLower(pieceChar)}]";
+                    }
+                }
+
+                Console.Write(symbol);
+
+                // 13. FIXED: availableMoves -> AvailableMoves, availableAttacks -> AvailableAttacks
+                if (game.AvailableMoves.Contains(pos))
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.Write("M"); // Move available
+                }
+                else if (game.AvailableAttacks.Contains(pos))
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Write("A"); // Attack available
+                }
+                else
+                {
+                    Console.Write(" |");
+               }
+                Console.ResetColor();
+                
+                Console.Write(" ");
+            }
+            Console.WriteLine();
+            Console.WriteLine("    -------------------------------------------------");
+        }
+        Console.WriteLine();
+    }
+}
