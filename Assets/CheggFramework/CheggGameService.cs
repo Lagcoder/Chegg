@@ -7,14 +7,15 @@ namespace Chegg.Framework
 {
     public sealed class CheggGameService
     {
-        private const int MaxFalseCheggCallsBeforeForfeit = 10;
         private const int ManaCapIncrementPerTurn = 1;
         private const int DrainCounterGracePeriod = 1;
         private const int AttackManaCost = 1;
         private const int DashManaCost = 1;
 
-        public CheggGameState State { get; } = new CheggGameState();
+        public CheggGameState State { get; private set; } = new CheggGameState();
         public ICheggPatternResolver PatternResolver { get; set; } = new EmptyPatternResolver();
+        private CheggGameState _turnStartSnapshot;
+        private CheggPlayer _turnStartSnapshotPlayer;
 
         public DeckValidationResult ValidateDeck(IEnumerable<CardId> deck)
         {
@@ -143,9 +144,11 @@ namespace Chegg.Framework
                     minion.HasSummoningSickness = false;
                 }
             }
+
+            CaptureTurnStartSnapshot(player);
         }
 
-        public void EndTurn(CheggPlayer player, bool calledChegg, bool checkIsValid)
+        public void EndTurn(CheggPlayer player, bool calledChegg)
         {
             if (State.CurrentTurn != player || State.Outcome != CheggMatchOutcome.Ongoing)
             {
@@ -155,19 +158,14 @@ namespace Chegg.Framework
             var playerState = State.GetPlayerState(player);
             if (calledChegg)
             {
-                if (checkIsValid)
+                bool sandboxValidatedCheck = ValidateCheggCallWithSandbox(player);
+                if (sandboxValidatedCheck)
                 {
                     playerState.CalledCheggLastTurn = true;
                 }
                 else
                 {
-                    playerState.FalseCheggCalls++;
                     playerState.CalledCheggLastTurn = false;
-                    if (playerState.FalseCheggCalls >= MaxFalseCheggCallsBeforeForfeit)
-                    {
-                        State.Outcome = player == CheggPlayer.Red ? CheggMatchOutcome.BlueWins : CheggMatchOutcome.RedWins;
-                        return;
-                    }
                 }
             }
             else
@@ -175,8 +173,26 @@ namespace Chegg.Framework
                 playerState.CalledCheggLastTurn = false;
             }
 
-            ProcessEndOfTurnEffects(player);
-            EndTurnInternal(skipBecauseDrowning: false);
+            AdvanceTurnWithoutActions();
+        }
+
+        public bool TryResetToTurnStart(CheggPlayer player, out string reason)
+        {
+            reason = string.Empty;
+            if (_turnStartSnapshot == null)
+            {
+                reason = "No turn-start snapshot available.";
+                return false;
+            }
+
+            if (State.CurrentTurn != player || _turnStartSnapshotPlayer != player)
+            {
+                reason = "Can only reset your own current turn.";
+                return false;
+            }
+
+            State = CloneState(_turnStartSnapshot);
+            return true;
         }
 
         public void EnterTile(MinionInstance minion, Vector2Int newPosition)
@@ -470,11 +486,22 @@ namespace Chegg.Framework
         {
             if (!skipBecauseDrowning)
             {
-                var current = State.GetPlayerState(State.CurrentTurn);
-                ProcessDrainCounterDelta(current);
+                AdvanceTurnWithoutActions();
+                return;
             }
 
             State.CurrentTurn = State.CurrentTurn == CheggPlayer.Red ? CheggPlayer.Blue : CheggPlayer.Red;
+            State.TurnNumber++;
+            StartTurn(State.CurrentTurn);
+        }
+
+        private void AdvanceTurnWithoutActions()
+        {
+            var current = State.CurrentTurn;
+            ProcessEndOfTurnEffects(current);
+            var currentPlayer = State.GetPlayerState(current);
+            ProcessDrainCounterDelta(currentPlayer);
+            State.CurrentTurn = current == CheggPlayer.Red ? CheggPlayer.Blue : CheggPlayer.Red;
             State.TurnNumber++;
             StartTurn(State.CurrentTurn);
         }
@@ -620,6 +647,149 @@ namespace Chegg.Framework
                 minion.IsDrowning = IsDrowning(minion);
                 return;
             }
+        }
+
+        private bool ValidateCheggCallWithSandbox(CheggPlayer caller)
+        {
+            CheggGameState liveState = State;
+            CheggGameState liveSnapshot = _turnStartSnapshot;
+            CheggPlayer liveSnapshotPlayer = _turnStartSnapshotPlayer;
+
+            try
+            {
+                State = CloneState(liveState);
+                _turnStartSnapshot = CloneState(liveSnapshot);
+                _turnStartSnapshotPlayer = liveSnapshotPlayer;
+
+                AdvanceTurnWithoutActions();
+                AdvanceTurnWithoutActions();
+                return CanCurrentPlayerCaptureEnemyKingNow(caller);
+            }
+            finally
+            {
+                State = liveState;
+                _turnStartSnapshot = liveSnapshot;
+                _turnStartSnapshotPlayer = liveSnapshotPlayer;
+            }
+        }
+
+        private bool CanCurrentPlayerCaptureEnemyKingNow(CheggPlayer attackerPlayer)
+        {
+            if (State.CurrentTurn != attackerPlayer)
+            {
+                return false;
+            }
+
+            var enemyKing = State.Minions.FirstOrDefault(m => m.Owner != attackerPlayer && CheggCatalog.Cards[m.CardId].IsKing);
+            if (enemyKing == null)
+            {
+                return false;
+            }
+
+            var attackerState = State.GetPlayerState(attackerPlayer);
+            foreach (var minion in State.GetPlayerMinions(attackerPlayer))
+            {
+                if (minion.HasSummoningSickness || !CanAttack(minion) || !IsKingKillAllowed(minion))
+                {
+                    continue;
+                }
+
+                if (minion.AttacksUsedThisTurn >= GetAttackCountAllowance(minion))
+                {
+                    continue;
+                }
+
+                if (attackerState.CurrentMana < AttackManaCost)
+                {
+                    continue;
+                }
+
+                var targets = PatternResolver.GetValidAttackTargets(State, minion);
+                if (targets.Contains(enemyKing.Position))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void CaptureTurnStartSnapshot(CheggPlayer player)
+        {
+            _turnStartSnapshot = CloneState(State);
+            _turnStartSnapshotPlayer = player;
+        }
+
+        private static CheggGameState CloneState(CheggGameState source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var clone = new CheggGameState
+            {
+                Outcome = source.Outcome,
+                CurrentTurn = source.CurrentTurn,
+                TurnNumber = source.TurnNumber,
+                MostRecentlyKilledMinionCard = source.MostRecentlyKilledMinionCard,
+                Red = ClonePlayerState(source.Red),
+                Blue = ClonePlayerState(source.Blue)
+            };
+
+            clone.GlobalSpellDiscard.Clear();
+            clone.GlobalSpellDiscard.AddRange(source.GlobalSpellDiscard);
+
+            clone.Minions.Clear();
+            foreach (var minion in source.Minions)
+            {
+                clone.Minions.Add(CloneMinion(minion));
+            }
+
+            return clone;
+        }
+
+        private static CheggPlayerState ClonePlayerState(CheggPlayerState source)
+        {
+            var clone = new CheggPlayerState(source.Player)
+            {
+                MaxManaCap = source.MaxManaCap,
+                BaseManaCap = source.BaseManaCap,
+                CurrentMana = source.CurrentMana,
+                DrainCounter = source.DrainCounter,
+                CalledCheggLastTurn = source.CalledCheggLastTurn,
+                IsInCheck = source.IsInCheck,
+                IsKingAlive = source.IsKingAlive
+            };
+
+            clone.Deck.AddRange(source.Deck);
+            clone.Hand.AddRange(source.Hand);
+            clone.Discard.AddRange(source.Discard);
+            return clone;
+        }
+
+        private static MinionInstance CloneMinion(MinionInstance source)
+        {
+            var clone = new MinionInstance(source.CardId, source.Owner, source.Position)
+            {
+                InstanceId = source.InstanceId,
+                HasSummoningSickness = source.HasSummoningSickness,
+                FreeMovesUsedThisTurn = source.FreeMovesUsedThisTurn,
+                AttacksUsedThisTurn = source.AttacksUsedThisTurn,
+                DashesUsedThisTurn = source.DashesUsedThisTurn,
+                IsDrowning = source.IsDrowning
+            };
+
+            clone.Effects.Clear();
+            foreach (var effect in source.Effects)
+            {
+                clone.Effects.Add(new EffectInstance(effect.Kind, effect.RemainingTurns)
+                {
+                    Consumed = effect.Consumed
+                });
+            }
+
+            return clone;
         }
     }
 }

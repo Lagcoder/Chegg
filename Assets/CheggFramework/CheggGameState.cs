@@ -13,7 +13,6 @@ namespace Chegg.Framework
         public int BaseManaCap = 1;
         public int CurrentMana = 1;
         public int DrainCounter;
-        public int FalseCheggCalls;
         public bool CalledCheggLastTurn;
         public bool IsInCheck;
         public bool IsKingAlive = true;

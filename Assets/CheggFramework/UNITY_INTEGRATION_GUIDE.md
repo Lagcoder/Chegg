@@ -33,7 +33,8 @@ Implemented now:
 - mana progression and drain counter cap restrictions
 - turn start/end flow (draw + refresh + effect processing)
 - drowning detection and drowning turn resolution choices
-- chegg-call bookkeeping and false-chegg forfeiture
+- chegg-call sandbox validation (simulate to your next turn with opponent not moving)
+- reset-to-beginning-of-turn checkpoint API for a UI reset button
 - move/attack action economy and validation flow (turn ownership, mana costs, summon sickness, movement-vs-attack exclusivity)
 - all specified effects:
   - Poison
@@ -115,11 +116,16 @@ Recommended migration path:
 2. Route summon validation to `TrySpawnMinion(...)`.
 3. At turn transitions:
    - call `StartTurn(currentPlayer)` at turn start
-   - call `EndTurn(currentPlayer, calledChegg, checkIsValid)` at turn end
-4. Before allowing normal turn actions, check drowning:
+   - call `EndTurn(currentPlayer, calledChegg)` at turn end
+   - if `calledChegg == true`, the framework validates the call using a sandbox simulation
+     (advance to opponent turn, then back to caller turn with no opponent actions)
+4. Add a reset button in UI and wire it to:
+   - `TryResetToTurnStart(currentPlayer, out reason)`
+   - this restores board/mana/effects/actions to the captured start-of-turn checkpoint
+5. Before allowing normal turn actions, check drowning:
    - `GetDrowningMinions(currentPlayer)` and force resolution choice in UI
-5. Apply effects centrally with `ApplyEffect(...)`.
-6. Query effect restrictions via:
+6. Apply effects centrally with `ApplyEffect(...)`.
+7. Query effect restrictions via:
    - `CanDash(...)`
    - `CanAttack(...)`
    - `GetFreeMoveCount(...)`
