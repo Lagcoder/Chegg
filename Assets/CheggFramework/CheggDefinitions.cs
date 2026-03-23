@@ -104,7 +104,7 @@ namespace Chegg.Framework
         ENDER_DRAGON,
         WEB_SHOT,
         WIND_CHARGE,
-        LIGHTING,
+        LIGHTNING,
         TNT,
         ECHO_SHARD,
         CHORUS_FRUIT,

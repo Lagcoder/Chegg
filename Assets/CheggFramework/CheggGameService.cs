@@ -7,8 +7,9 @@ namespace Chegg.Framework
 {
     public sealed class CheggGameService
     {
-        private const int FalseCheggForfeitThreshold = 10;
+        private const int MaxFalseCheggCallsBeforeForfeit = 10;
         private const int ManaCapIncrementPerTurn = 1;
+        private const int DrainCounterGracePeriod = 1;
         private const int AttackManaCost = 1;
         private const int DashManaCost = 1;
 
@@ -162,7 +163,7 @@ namespace Chegg.Framework
                 {
                     playerState.FalseCheggCalls++;
                     playerState.CalledCheggLastTurn = false;
-                    if (playerState.FalseCheggCalls > FalseCheggForfeitThreshold)
+                    if (playerState.FalseCheggCalls >= MaxFalseCheggCallsBeforeForfeit)
                     {
                         State.Outcome = player == CheggPlayer.Red ? CheggMatchOutcome.BlueWins : CheggMatchOutcome.RedWins;
                         return;
@@ -337,10 +338,7 @@ namespace Chegg.Framework
             }
 
             EnterTile(minion, target);
-            if (IsDrowning(minion))
-            {
-                minion.IsDrowning = true;
-            }
+            minion.IsDrowning = IsDrowning(minion);
 
             return true;
         }
@@ -439,7 +437,7 @@ namespace Chegg.Framework
             }
 
             var def = CheggCatalog.Cards[minion.CardId];
-            bool survivesWater = def.IsSwimming || def.IsFlying || def.MovementTraits.HasFlag(MovementTraits.Swim) || def.MovementTraits.HasFlag(MovementTraits.Fly);
+            bool survivesWater = def.MovementTraits.HasFlag(MovementTraits.Swim) || def.MovementTraits.HasFlag(MovementTraits.Fly);
             return !survivesWater;
         }
 
@@ -497,7 +495,7 @@ namespace Chegg.Framework
         {
             playerState.BaseManaCap = Math.Min(playerState.MaxManaCap, playerState.BaseManaCap + ManaCapIncrementPerTurn);
 
-            int drainPenalty = Math.Max(0, playerState.DrainCounter - 1);
+            int drainPenalty = Mathf.Max(0, playerState.DrainCounter - DrainCounterGracePeriod);
             int effectiveCap = Mathf.Max(0, playerState.BaseManaCap - drainPenalty);
             playerState.CurrentMana = effectiveCap;
         }
@@ -535,13 +533,7 @@ namespace Chegg.Framework
                         }
                     }
 
-                    if (effect.Kind == EffectKind.Poison && effect.RemainingTurns <= 0)
-                    {
-                        RemoveMinion(minion);
-                        break;
-                    }
-
-                    if (effect.Kind == EffectKind.Fire && effect.RemainingTurns <= 0)
+                    if (IsExpiredLethalEffect(effect))
                     {
                         RemoveMinion(minion);
                         break;
@@ -591,6 +583,16 @@ namespace Chegg.Framework
             {
                 State.Outcome = defender.Owner == CheggPlayer.Red ? CheggMatchOutcome.BlueWins : CheggMatchOutcome.RedWins;
             }
+        }
+
+        private static bool IsExpiredLethalEffect(EffectInstance effect)
+        {
+            if (effect.RemainingTurns > 0)
+            {
+                return false;
+            }
+
+            return effect.Kind == EffectKind.Poison || effect.Kind == EffectKind.Fire;
         }
 
         private void TryMoveDrowningMinionLaterally(MinionInstance minion)
