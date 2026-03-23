@@ -122,7 +122,7 @@ namespace Chegg.Framework
             {
                 TryMoveDrowningMinionLaterally(minion);
             }
-            EndTurnInternal(skipBecauseDrowning: true);
+            AdvanceTurnWithoutActions();
             return true;
         }
 
