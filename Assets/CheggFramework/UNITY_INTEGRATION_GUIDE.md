@@ -23,8 +23,8 @@ Folder: `Assets/CheggFramework/`
 
 ## 2) Design scope
 
-This framework intentionally **does not implement specific move/attack patterns** yet.  
-It provides the complete rule scaffolding so pattern logic can be plugged in later.
+This framework intentionally leaves only **per-minion target pattern generation** unimplemented.  
+Core move/attack action flow is implemented; pattern targeting is pluggable.
 
 Implemented now:
 
@@ -34,6 +34,7 @@ Implemented now:
 - turn start/end flow (draw + refresh + effect processing)
 - drowning detection and drowning turn resolution choices
 - chegg-call bookkeeping and false-chegg forfeiture
+- move/attack action economy and validation flow (turn ownership, mana costs, summon sickness, movement-vs-attack exclusivity)
 - all specified effects:
   - Poison
   - Fire
@@ -157,8 +158,11 @@ Recommended migration path:
 
 When ready, add:
 
-1. `ICheggPatternResolver` interface for move/attack generation.
-2. Resolver implementations per minion card.
+1. Resolver implementations per minion card (the interface already exists).
+   - `ICheggPatternResolver.GetValidMoveTargets(...)`
+   - `ICheggPatternResolver.GetValidAttackTargets(...)`
+2. Replace `EmptyPatternResolver` with your concrete resolver:
+   - `cheggService.PatternResolver = new YourPatternResolver();`
 3. Validation layers:
    - board bounds
    - occupancy
@@ -166,4 +170,4 @@ When ready, add:
    - action economy (free move vs dash vs attack)
    - check + chegg capture legality.
 
-Keep this in a separate file set so the framework’s core state/rules remain stable and testable.
+Keep patterns in a separate file set so the framework’s core state/rules remain stable and testable.

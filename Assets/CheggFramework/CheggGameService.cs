@@ -7,7 +7,13 @@ namespace Chegg.Framework
 {
     public sealed class CheggGameService
     {
+        private const int FalseCheggForfeitThreshold = 10;
+        private const int ManaCapIncrementPerTurn = 1;
+        private const int AttackManaCost = 1;
+        private const int DashManaCost = 1;
+
         public CheggGameState State { get; } = new CheggGameState();
+        public ICheggPatternResolver PatternResolver { get; set; } = new EmptyPatternResolver();
 
         public DeckValidationResult ValidateDeck(IEnumerable<CardId> deck)
         {
@@ -128,9 +134,9 @@ namespace Chegg.Framework
 
             foreach (var minion in State.GetPlayerMinions(player))
             {
-                minion.HasAttackedThisTurn = false;
-                minion.HasDashedThisTurn = false;
-                minion.HasFreeMove = true;
+                minion.AttacksUsedThisTurn = 0;
+                minion.DashesUsedThisTurn = 0;
+                minion.FreeMovesUsedThisTurn = 0;
                 if (minion.HasSummoningSickness)
                 {
                     minion.HasSummoningSickness = false;
@@ -156,7 +162,7 @@ namespace Chegg.Framework
                 {
                     playerState.FalseCheggCalls++;
                     playerState.CalledCheggLastTurn = false;
-                    if (playerState.FalseCheggCalls > 10)
+                    if (playerState.FalseCheggCalls > FalseCheggForfeitThreshold)
                     {
                         State.Outcome = player == CheggPlayer.Red ? CheggMatchOutcome.BlueWins : CheggMatchOutcome.RedWins;
                         return;
@@ -247,6 +253,173 @@ namespace Chegg.Framework
             return !HasEffect(attackingMinion, EffectKind.BadOmen);
         }
 
+        public bool TryMove(CheggPlayer player, Guid minionId, Vector2Int target, bool spendDash, out string reason)
+        {
+            reason = string.Empty;
+            if (State.CurrentTurn != player)
+            {
+                reason = "Not this player's turn.";
+                return false;
+            }
+
+            var minion = State.Minions.FirstOrDefault(m => m.InstanceId == minionId);
+            if (minion == null || minion.Owner != player)
+            {
+                reason = "Minion not found for player.";
+                return false;
+            }
+
+            if (minion.HasSummoningSickness)
+            {
+                reason = "Minion cannot act on spawn turn.";
+                return false;
+            }
+
+            if (HasEffect(minion, EffectKind.Stunned))
+            {
+                reason = "Minion is stunned.";
+                return false;
+            }
+
+            if (!State.Board.IsOnBoard(target))
+            {
+                reason = "Target is out of bounds.";
+                return false;
+            }
+
+            if (State.GetMinionAt(target) != null)
+            {
+                reason = "Target tile is occupied.";
+                return false;
+            }
+
+            if (minion.AttacksUsedThisTurn > 0)
+            {
+                reason = "Cannot move after attacking this turn.";
+                return false;
+            }
+
+            var validTargets = PatternResolver.GetValidMoveTargets(State, minion);
+            if (!validTargets.Contains(target))
+            {
+                reason = "Target is not in move pattern.";
+                return false;
+            }
+
+            if (spendDash)
+            {
+                if (!CanDash(minion))
+                {
+                    reason = "Minion cannot dash.";
+                    return false;
+                }
+
+                var playerState = State.GetPlayerState(player);
+                if (playerState.CurrentMana < DashManaCost)
+                {
+                    reason = "Not enough mana for dash.";
+                    return false;
+                }
+
+                playerState.CurrentMana -= DashManaCost;
+                minion.DashesUsedThisTurn++;
+            }
+            else
+            {
+                int freeAllowance = GetFreeMoveCount(minion);
+                if (minion.FreeMovesUsedThisTurn >= freeAllowance)
+                {
+                    reason = "No free move remaining.";
+                    return false;
+                }
+
+                minion.FreeMovesUsedThisTurn++;
+            }
+
+            EnterTile(minion, target);
+            if (IsDrowning(minion))
+            {
+                minion.IsDrowning = true;
+            }
+
+            return true;
+        }
+
+        public bool TryAttack(CheggPlayer player, Guid attackerId, Vector2Int target, out string reason)
+        {
+            reason = string.Empty;
+            if (State.CurrentTurn != player)
+            {
+                reason = "Not this player's turn.";
+                return false;
+            }
+
+            var attacker = State.Minions.FirstOrDefault(m => m.InstanceId == attackerId);
+            if (attacker == null || attacker.Owner != player)
+            {
+                reason = "Attacker not found for player.";
+                return false;
+            }
+
+            if (attacker.HasSummoningSickness)
+            {
+                reason = "Minion cannot act on spawn turn.";
+                return false;
+            }
+
+            if (!CanAttack(attacker))
+            {
+                reason = "Minion cannot attack right now.";
+                return false;
+            }
+
+            if (attacker.FreeMovesUsedThisTurn > 0 || attacker.DashesUsedThisTurn > 0)
+            {
+                reason = "Cannot attack after moving/dashing this turn.";
+                return false;
+            }
+
+            int attackAllowance = GetAttackCountAllowance(attacker);
+            if (attacker.AttacksUsedThisTurn >= attackAllowance)
+            {
+                reason = "No attack action remaining.";
+                return false;
+            }
+
+            var playerState = State.GetPlayerState(player);
+            if (playerState.CurrentMana < AttackManaCost)
+            {
+                reason = "Not enough mana for attack.";
+                return false;
+            }
+
+            var validTargets = PatternResolver.GetValidAttackTargets(State, attacker);
+            if (!validTargets.Contains(target))
+            {
+                reason = "Target is not in attack pattern.";
+                return false;
+            }
+
+            var defender = State.GetMinionAt(target);
+            if (defender == null || defender.Owner == player)
+            {
+                reason = "No valid enemy target at tile.";
+                return false;
+            }
+
+            bool defenderIsKing = CheggCatalog.Cards[defender.CardId].IsKing;
+            if (defenderIsKing && !IsKingKillAllowed(attacker))
+            {
+                reason = "Bad Omen prevents king kill/check.";
+                return false;
+            }
+
+            playerState.CurrentMana -= AttackManaCost;
+            attacker.AttacksUsedThisTurn++;
+            ResolveAttackResult(attacker, defender);
+            return true;
+        }
+
         public bool IsDrowning(MinionInstance minion)
         {
             if (!State.Board.IsOnBoard(minion.Position))
@@ -322,7 +495,7 @@ namespace Chegg.Framework
 
         private void RefreshManaForTurn(CheggPlayerState playerState)
         {
-            playerState.BaseManaCap = Math.Min(playerState.MaxManaCap, playerState.BaseManaCap + 1);
+            playerState.BaseManaCap = Math.Min(playerState.MaxManaCap, playerState.BaseManaCap + ManaCapIncrementPerTurn);
 
             int drainPenalty = Math.Max(0, playerState.DrainCounter - 1);
             int effectiveCap = Mathf.Max(0, playerState.BaseManaCap - drainPenalty);
@@ -403,6 +576,21 @@ namespace Chegg.Framework
         private void RemoveMinion(MinionInstance minion)
         {
             State.Minions.Remove(minion);
+        }
+
+        private void ResolveAttackResult(MinionInstance attacker, MinionInstance defender)
+        {
+            bool blockedByResistance = TryConsumeResistance(defender);
+            if (blockedByResistance)
+            {
+                return;
+            }
+
+            RemoveMinion(defender);
+            if (CheggCatalog.Cards[defender.CardId].IsKing)
+            {
+                State.Outcome = defender.Owner == CheggPlayer.Red ? CheggMatchOutcome.BlueWins : CheggMatchOutcome.RedWins;
+            }
         }
 
         private void TryMoveDrowningMinionLaterally(MinionInstance minion)

@@ -60,7 +60,7 @@ namespace Chegg.Framework
 
             AddSpell(cards, CardId.WEB_SHOT, "Web Shot", 2, "Area movement block and ensnare.");
             AddSpell(cards, CardId.WIND_CHARGE, "Wind Charge", 2, "2x2 push with edge stun and water breathing rider.");
-            AddSpell(cards, CardId.LIGHTING, "Lighting", 3, "Single-target 2-turn stun.");
+            AddSpell(cards, CardId.LIGHTING, "Lightning", 3, "Single-target 2-turn stun.");
             AddSpell(cards, CardId.TNT, "TNT", 3, "Delayed 3x3 detonation blocker.");
             AddSpell(cards, CardId.ECHO_SHARD, "Echo Shard", 3, "Resurrect most recently killed minion in spawn.");
             AddSpell(cards, CardId.CHORUS_FRUIT, "Chorus Fruit", 3, "Teleport own minion to spawn and cleanse utility.");

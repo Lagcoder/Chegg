@@ -141,13 +141,10 @@ namespace Chegg.Framework
         public CheggPlayer Owner;
         public Vector2Int Position;
         public bool HasSummoningSickness = true;
-        public bool HasFreeMove = true;
-        public bool HasAttackedThisTurn;
-        public bool HasDashedThisTurn;
+        public int FreeMovesUsedThisTurn;
+        public int AttacksUsedThisTurn;
+        public int DashesUsedThisTurn;
         public bool IsDrowning;
-        public bool IsStunned;
-        public int StunnedTurnsRemaining;
-        public bool HasBadOmen;
         public readonly List<EffectInstance> Effects = new List<EffectInstance>();
 
         public MinionInstance(CardId cardId, CheggPlayer owner, Vector2Int position)
