@@ -115,7 +115,7 @@ namespace Chegg.Framework
                         Polarity = EffectPolarity.Negative,
                         RemovalRule = EffectRemovalRule.EnterOwnSpawnZone,
                         DefaultDurationTurns = 0,
-                        MechanicDescription = "Minion cannot put king in check or kill king until own spawn zone."
+                        MechanicDescription = "Minion cannot put king in check or kill king until it re-enters own spawn zone."
                     }
                 },
                 { EffectKind.Stunned, new EffectDefinition
