@@ -148,6 +148,7 @@ namespace Chegg.Framework
         public bool IsStunned;
         public int StunnedTurnsRemaining;
         public bool HasBadOmen;
+        public readonly List<EffectInstance> Effects = new List<EffectInstance>();
 
         public MinionInstance(CardId cardId, CheggPlayer owner, Vector2Int position)
         {

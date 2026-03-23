@@ -80,7 +80,7 @@ namespace Chegg.Framework
                 DisplayName = displayName,
                 Kind = CardKind.Minion,
                 ManaCost = manaCost,
-                IsKing = id == CardId.VILLAGER,
+                IsKing = id == CardId.VILLAGER || id == CardId.TRADER_KING || id == CardId.ZOMBIE_KING || id == CardId.PILLAGER_KING,
                 IsAlternateKingForm = id == CardId.TRADER_KING || id == CardId.ZOMBIE_KING || id == CardId.PILLAGER_KING,
                 IsFlying = id == CardId.PHANTOM || id == CardId.PARROT || id == CardId.WITHER || id == CardId.ENDER_DRAGON,
                 IsSwimming = id == CardId.PUFFER_FISH || id == CardId.FROG || id == CardId.GUARDIAN || id == CardId.DOLPHIN || id == CardId.SKELETON_HORSE || id == CardId.ELDER_GUARDIAN,
